@@ -1,6 +1,6 @@
 {
   "name": "qemu-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "MCP server for controlling QEMU virtual machines with text-first screen access and FAT image tools.",
   "type": "module",
   "private": true,
@@ -9,7 +9,7 @@
   },
   "scripts": {
     "mcp": "node scripts/mcp/server.mjs",
-    "test": "node --test \"tests/mcp/*.test.mjs\" \"tests/fat/*.test.mjs\""
+    "test": "node scripts/run-tests.mjs"
   },
   "engines": {
     "node": ">=20"
