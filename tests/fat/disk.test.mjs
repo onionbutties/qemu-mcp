@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildImage, listImage, readImage } from '../../tools/fatimg.mjs';
 
-const work = path.join(process.cwd(), 'tests', 'tmp');
+const work = path.join(process.cwd(), 'tests', 'tmp', 'fat-disk');
 fs.mkdirSync(work, { recursive: true });
 const tmp = path.join(work, 'mcp-fat.img');
 

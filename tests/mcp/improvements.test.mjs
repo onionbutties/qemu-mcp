@@ -44,7 +44,7 @@ test('tesseract OCR command honors environment overrides', () => {
 });
 
 test('tesseract provider invokes the configured binary', async () => {
-  const dir = path.join(process.cwd(), 'tests', 'tmp');
+  const dir = path.join(process.cwd(), 'tests', 'tmp', 'ocr');
   fs.mkdirSync(dir, { recursive: true });
   const script = path.join(dir, 'fake-tesseract.mjs');
   fs.writeFileSync(script, "process.stdout.write('fake-ocr\\n');\n");
@@ -96,7 +96,7 @@ test('screen_ascii tolerates cols=0', () => {
 
 test('fat_build rejects tiny images', () => {
   assert.throws(
-    () => buildFatImage(path.join(process.cwd(), 'tests', 'tmp', 'tiny.img'), { sizeBytes: 100, files: [] }),
+    () => buildFatImage(path.join(process.cwd(), 'tests', 'tmp', 'improvements', 'tiny.img'), { sizeBytes: 100, files: [] }),
     /sizeBytes/,
   );
 });
