@@ -10,7 +10,7 @@ test('readScreenAscii returns non-empty text for an existing screenshot', () => 
   assert.ok(ascii.length > 0);
 });
 
-test('readScreenText converts and OCRs an existing PPM', async () => {
+test('readScreenText converts and OCRs an existing PPM', { skip: process.platform !== 'win32' }, async () => {
   const text = await readScreenText(ppm);
   assert.equal(typeof text, 'string');
 });
