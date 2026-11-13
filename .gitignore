@@ -7,3 +7,7 @@ share/
 *.png
 .DS_Store
 Thumbs.db
+
+!vm/shots/
+!vm/shots/*.ppm
+!vm/shots/*.png
