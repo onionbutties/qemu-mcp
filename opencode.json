@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "qemu": {
+      "type": "local",
+      "command": [
+        "node",
+        "D:\\_oblocal\\stuff\\wfw\\scripts\\mcp\\server.mjs"
+      ],
+      "enabled": true
+    }
+  }
+}

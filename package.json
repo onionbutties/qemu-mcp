@@ -1,0 +1,8 @@
+{
+  "scripts": {
+    "mcp": "node scripts/mcp/server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2"
+  }
+}

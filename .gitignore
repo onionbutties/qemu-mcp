@@ -1,0 +1,9 @@
+node_modules/
+vm/*.qcow2
+vm/shots/
+vm/test/
+share/
+*.ppm
+*.png
+.DS_Store
+Thumbs.db
