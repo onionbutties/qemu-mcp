@@ -17,5 +17,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
       - run: npm ci
       - run: npm test

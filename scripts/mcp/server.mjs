@@ -15,15 +15,17 @@ import { registerMacroTools } from './tools/macro-tools.mjs';
 
 const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+const name = pkg.name || 'qemu-mcp';
+const version = pkg.version || '0.2.0';
 const args = process.argv.slice(2);
 
 if (args.includes('--version') || args.includes('-v')) {
-  process.stdout.write(`${pkg.name} ${pkg.version}\n`);
+  process.stdout.write(`${name} ${version}\n`);
   process.exit(0);
 }
 
 if (args.includes('--help') || args.includes('-h')) {
-  process.stdout.write(`qemu-mcp ${pkg.version}
+  process.stdout.write(`qemu-mcp ${version}
 
 Usage: qemu-mcp [--help] [--version]
 
@@ -36,11 +38,15 @@ Environment:
   QEMU_DISK           default disk image (./vm/disk.qcow2)
   QEMU_MONITOR_PORT   QMP monitor port (5555)
   QEMU_MCP_MACROS     macro directory override
+  QEMU_MCP_OCR        auto, windows, or tesseract
+  QEMU_MCP_TESSERACT  tesseract binary
+  QEMU_MCP_OCR_LANG   tesseract language (eng)
+  QEMU_MCP_OCR_PSM    tesseract page segmentation mode (6)
 `);
   process.exit(0);
 }
 
-const server = new McpServer({ name: 'qemu-mcp', version: pkg.version });
+const server = new McpServer({ name: 'qemu-mcp', version });
 const session = new VmSession();
 
 registerVmTools(server, session);

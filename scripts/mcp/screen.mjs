@@ -3,15 +3,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { decodeImage, toAscii } from '../../tools/imgpeek.mjs';
+import { runOcr } from '../../tools/ocr.mjs';
 import { writePng } from '../../tools/ppm2png.mjs';
-
-const execFileAsync = promisify(execFile);
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const OCR_SCRIPT = path.join(ROOT, 'tools', 'ocr.ps1');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -119,15 +113,7 @@ export async function readScreenText(inputPath) {
     convertToPng(inputPath, pngPath);
   }
   try {
-    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-File', OCR_SCRIPT, '-Path', pngPath], {
-      encoding: 'utf8',
-      timeout: 60000,
-      windowsHide: true,
-    });
-    return String(stdout ?? '').trim();
-  } catch (err) {
-    const stderr = err && err.stderr ? String(err.stderr).trim() : '';
-    throw new Error(`OCR failed${stderr ? ': ' + stderr : ': ' + (err?.message ?? err)}`);
+    return await runOcr(pngPath);
   } finally {
     if (temp) {
       try { fs.unlinkSync(pngPath); } catch {}

@@ -19,7 +19,10 @@ MCP server for controlling QEMU over QMP and the human monitor. The control loop
 
 - Node.js 20 or newer.
 - QEMU with `qemu-system-i386` and `qemu-img`.
-- Windows for OCR (`screen_text`, `wait_for_text`). `screen_ascii` and `screenshot` work on any platform.
+- An OCR engine for `screen_text` and `wait_for_text`:
+  - Windows: the built-in Windows OCR engine via PowerShell.
+  - Linux and macOS: Tesseract (`tesseract` on `PATH`).
+  - `screen_ascii` and `screenshot` work without OCR.
 
 QEMU defaults to `C:\Program Files\qemu\qemu-system-i386.exe`. Set these to override it:
 
@@ -30,6 +33,25 @@ QEMU defaults to `C:\Program Files\qemu\qemu-system-i386.exe`. Set these to over
 | `QEMU_DISK` | `./vm/disk.qcow2` | default disk when `vm_launch` omits `disk` |
 | `QEMU_MONITOR_PORT` | `5555` | QMP monitor port |
 | `QEMU_MCP_MACROS` | bundled `scripts/mcp/macros` | macro directory override |
+| `QEMU_MCP_OCR` | `auto` | `auto`, `windows`, or `tesseract` |
+| `QEMU_MCP_TESSERACT` | `tesseract` | Tesseract binary |
+| `QEMU_MCP_OCR_LANG` | `eng` | Tesseract language |
+| `QEMU_MCP_OCR_PSM` | `6` | Tesseract page segmentation mode |
+
+Install Tesseract:
+
+```sh
+# Ubuntu / Debian
+sudo apt install tesseract-ocr
+
+# Fedora
+sudo dnf install tesseract
+
+# macOS
+brew install tesseract
+```
+
+Windows uses its built-in OCR engine; no extra package is required.
 
 ## Install
 
@@ -247,7 +269,7 @@ Tests cover the FAT reader, screen helpers, VM session locking, tool registratio
 ## Limits
 
 - One VM session per MCP server process.
-- OCR requires Windows and the Windows OCR engine.
+- OCR quality depends on the engine and the guest's font rendering. Tesseract works best with clean, high-contrast text screens.
 - The server drives a GUI guest through keyboard and mouse; it does not provide pixel-level element lookup.
 - `fat_build` writes FAT16 only. `fat_list` and `fat_read` accept FAT12 and FAT16.
 - QEMU paths are configurable, but the default machine profile (`machine.mjs`) is a 32-bit PC with IDE, USB UHCI, and Sound Blaster 16 support.
