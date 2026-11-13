@@ -96,7 +96,7 @@ test('screen_ascii tolerates cols=0', () => {
 
 test('fat_build rejects tiny images', () => {
   assert.throws(
-    () => buildFatImage(path.join(process.cwd(), 'vm', 'test', 'tiny.img'), { sizeBytes: 100, files: [] }),
+    () => buildFatImage(path.join(process.cwd(), 'tests', 'tmp', 'tiny.img'), { sizeBytes: 100, files: [] }),
     /sizeBytes/,
   );
 });
