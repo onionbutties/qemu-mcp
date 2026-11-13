@@ -234,7 +234,9 @@ function mbr(partitionOffset, partitionSectors, state) {
 
 export function buildImage(outPath, { sizeBytes, label = 'NO NAME', partitioned = false, fatType = 16, files = [] }) {
   if (fatType !== 16) throw new Error('FAT12 not implemented (only FAT16 is supported)');
+  if (!Number.isInteger(sizeBytes) || sizeBytes < 4096) throw new Error('sizeBytes must be an integer >= 4096');
   const offsetSectors = partitioned ? 2048 : 0;
+  if (sizeBytes <= offsetSectors * SECTOR) throw new Error('sizeBytes is too small for a partitioned image');
   const usableBytes = sizeBytes - offsetSectors * SECTOR;
 
   // Build the in-memory tree from the files spec.

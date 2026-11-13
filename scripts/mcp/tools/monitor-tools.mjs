@@ -1,13 +1,5 @@
 import { z } from 'zod';
-
-function textResult(result) {
-  return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-}
-
-function errorResult(err) {
-  const message = err && err.message ? err.message : String(err);
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }] };
-}
+import { textResult, errorResult } from './result.mjs';
 
 async function withLock(session, fn) {
   if (typeof session?.withLock === 'function') return session.withLock(fn);
@@ -17,7 +9,7 @@ async function withLock(session, fn) {
 export function registerMonitorTools(server, session) {
   server.registerTool('monitor_command', {
     description: 'Run a human monitor command.',
-    inputSchema: { command: z.string() },
+    inputSchema: { command: z.string().min(1) },
   }, async (args = {}) => {
     try {
       const { command } = args ?? {};
@@ -40,7 +32,7 @@ export function registerMonitorTools(server, session) {
   server.registerTool('qmp_execute', {
     description: 'Execute a QMP command.',
     inputSchema: {
-      command: z.string(),
+      command: z.string().min(1),
       arguments: z.record(z.any()).optional(),
     },
   }, async (args = {}) => {

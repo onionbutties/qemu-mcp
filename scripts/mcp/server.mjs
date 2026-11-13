@@ -9,7 +9,7 @@ import { registerScreenTools } from './tools/screen-tools.mjs';
 import { registerDiskTools } from './tools/disk-tools.mjs';
 import { registerMacroTools } from './tools/macro-tools.mjs';
 
-const server = new McpServer({ name: 'qemu-mcp', version: '0.1.0' });
+const server = new McpServer({ name: 'qemu-mcp', version: '0.2.0' });
 const session = new VmSession();
 
 registerVmTools(server, session);
@@ -21,3 +21,15 @@ registerMacroTools(server, session);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try { await session.quit(); } catch {}
+  process.stderr.write(`qemu-mcp: ${signal}, exiting\n`);
+  process.exit(0);
+}
+
+process.on('SIGINT', () => { void shutdown('SIGINT'); });
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });

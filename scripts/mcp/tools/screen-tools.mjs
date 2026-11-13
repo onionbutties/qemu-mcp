@@ -7,15 +7,14 @@ import {
   screenToImageContent,
   waitForText,
 } from '../screen.mjs';
+import { textResult, errorResult } from './result.mjs';
 
-function textResult(result) {
-  return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-}
-
-function errorResult(err) {
-  const message = err && err.message ? err.message : String(err);
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }] };
-}
+const cropSchema = z.object({
+  x: z.number().int().min(0),
+  y: z.number().int().min(0),
+  w: z.number().int().min(1),
+  h: z.number().int().min(1),
+}).optional();
 
 export function registerScreenTools(server, session) {
   server.registerTool('screenshot', {
@@ -38,7 +37,7 @@ export function registerScreenTools(server, session) {
   }, async () => {
     try {
       const ppm = await captureScreen(session);
-      const text = readScreenText(ppm);
+      const text = await readScreenText(ppm);
       return textResult(text);
     } catch (err) {
       return errorResult(err);
@@ -48,14 +47,15 @@ export function registerScreenTools(server, session) {
   server.registerTool('screen_ascii', {
     description: 'Capture the VM screen and return an ASCII rendering.',
     inputSchema: {
-      cols: z.number().optional(),
-      rows: z.number().optional(),
+      cols: z.number().int().min(1).max(2000).optional(),
+      rows: z.number().int().min(1).max(2000).optional(),
+      crop: cropSchema,
     },
   }, async (args = {}) => {
     try {
-      const { cols, rows } = args ?? {};
+      const { cols, rows, crop } = args ?? {};
       const ppm = await captureScreen(session);
-      const ascii = readScreenAscii(ppm, { cols, rows });
+      const ascii = readScreenAscii(ppm, { cols, rows, crop });
       return textResult(ascii);
     } catch (err) {
       return errorResult(err);
@@ -65,9 +65,9 @@ export function registerScreenTools(server, session) {
   server.registerTool('wait_for_text', {
     description: 'Poll the VM screen until the given text appears or the timeout expires.',
     inputSchema: {
-      pattern: z.string(),
-      timeoutMs: z.number().optional(),
-      intervalMs: z.number().optional(),
+      pattern: z.string().min(1),
+      timeoutMs: z.number().int().min(0).max(300000).optional(),
+      intervalMs: z.number().int().min(50).max(60000).optional(),
       regex: z.boolean().optional(),
     },
   }, async (args = {}) => {

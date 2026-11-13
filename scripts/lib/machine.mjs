@@ -1,15 +1,16 @@
 // Single source of truth for the emulated machine's hardware.
 import { P } from './qemu.mjs';
 
-export const DISK = P('vm', 'wfw.qcow2');
+export const DISK = process.env.QEMU_DISK || P('vm', 'wfw.qcow2');
 export const SHARE = P('share');
-export const MON_PORT = 5555;
+export { MON_PORT } from './qemu.mjs';
 
 /**
  * Build the QEMU argument list.
  *
  * opts:
- *   disk      qcow2 image (default vm/wfw.qcow2)
+ *   disk      disk image (default vm/wfw.qcow2 or $QEMU_DISK)
+ *   diskFormat  QEMU disk format (default qcow2)
  *   floppy0   floppy image to insert in A: (install media)
  *   cd        ISO to insert in the CD-ROM drive
  *   shareImg  raw FAT16 image exposed as a second hard disk
@@ -17,10 +18,12 @@ export const MON_PORT = 5555;
  *   usbHid    attach emulated USB keyboard/mouse
  *   boot      'a' | 'c' | 'd'
  *   sound     enable Sound Blaster 16
+ *   audioBackend  QEMU audiodev backend (default dsound on Windows, none elsewhere)
  */
 export function machineArgs(opts = {}) {
   const {
     disk = DISK,
+    diskFormat = 'qcow2',
     floppy0 = null,
     cd = null,
     shareImg = null,
@@ -28,6 +31,7 @@ export function machineArgs(opts = {}) {
     usbHid = false,
     boot = 'c',
     sound = true,
+    audioBackend = process.platform === 'win32' ? 'dsound' : 'none',
   } = opts;
 
   const args = [
@@ -38,7 +42,7 @@ export function machineArgs(opts = {}) {
     '-vga', 'std',
     '-rtc', 'base=localtime',
     '-boot', boot,
-    '-drive', `file=${disk},if=ide,index=0,media=disk,format=qcow2`,
+    '-drive', `file=${disk},if=ide,index=0,media=disk,format=${diskFormat}`,
     '-nic', 'none',
     '-parallel', 'none',
     '-serial', 'none',
@@ -53,7 +57,9 @@ export function machineArgs(opts = {}) {
     args.push('-device', 'usb-kbd,bus=uhci.0');
     args.push('-device', 'usb-mouse,bus=uhci.0');
   }
-  if (sound) args.push('-audiodev', 'dsound,id=snd0', '-device', 'sb16,audiodev=snd0');
+  if (sound && audioBackend !== 'none') {
+    args.push('-audiodev', `${audioBackend},id=snd0`, '-device', 'sb16,audiodev=snd0');
+  }
 
   return args;
 }

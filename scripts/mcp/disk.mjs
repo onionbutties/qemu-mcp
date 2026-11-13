@@ -1,6 +1,5 @@
 // Thin wrappers over tools/fatimg.mjs for the QEMU MCP disk tools.
 // Adds path validation and consistent, prefixed error messages.
-import fs from 'node:fs';
 import { listImage, readImage, buildImage } from '../../tools/fatimg.mjs';
 
 function requireNonEmptyString(value, fnName, paramName) {

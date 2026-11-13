@@ -4,10 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { decodeImage, toAscii } from '../../tools/imgpeek.mjs';
 import { writePng } from '../../tools/ppm2png.mjs';
 
+const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OCR_SCRIPT = path.join(ROOT, 'tools', 'ocr.ps1');
 
@@ -20,6 +22,11 @@ function uniqueName(ext = '.ppm') {
   return `screen-${Date.now()}-${rand}${ext}`;
 }
 
+async function withOptionalLock(session, fn) {
+  if (typeof session?.withLock === 'function') return session.withLock(fn);
+  return fn();
+}
+
 export async function captureScreen(session, { outDir } = {}) {
   const dir = outDir
     ? path.resolve(outDir)
@@ -29,16 +36,18 @@ export async function captureScreen(session, { outDir } = {}) {
 
   // Prefer screendump implementations that poll for the output file (monitor.screendump,
   // up to ~4s) over the short command fallbacks that return immediately.
-  if (typeof session?.screendump === 'function') {
-    await session.screendump(file);
+  if (typeof session?.monitor === 'function') {
+    await withOptionalLock(session, async () => {
+      const mon = await session.monitor();
+      if (typeof mon?.screendump === 'function') await mon.screendump(file);
+      else if (typeof mon?.cmd === 'function') await mon.cmd('screendump ' + file);
+      else if (typeof mon?.command === 'function') await mon.command('screendump ' + file);
+      else throw new Error('session does not support screendump');
+    });
   } else if (session?.mon && typeof session.mon.screendump === 'function') {
-    await session.mon.screendump(file);
-  } else if (typeof session?.monitor === 'function') {
-    const mon = await session.monitor();
-    if (typeof mon?.screendump === 'function') await mon.screendump(file);
-    else if (typeof mon?.cmd === 'function') await mon.cmd('screendump ' + file);
-    else if (typeof mon?.command === 'function') await mon.command('screendump ' + file);
-    else throw new Error('session does not support screendump');
+    await withOptionalLock(session, () => session.mon.screendump(file));
+  } else if (typeof session?.screendump === 'function') {
+    await session.screendump(file);
   } else if (typeof session?.command === 'function') {
     await session.command('screendump ' + file);
   } else if (typeof session?.cmd === 'function') {
@@ -61,7 +70,7 @@ export async function captureScreen(session, { outDir } = {}) {
     } catch {}
     await sleep(50);
   }
-  return file;
+  throw new Error('screendump produced no file: ' + file);
 }
 
 export function convertToPng(ppmPath, pngPath) {
@@ -100,7 +109,7 @@ export function screenToImageContent(ppmPath) {
   }
 }
 
-export function readScreenText(inputPath) {
+export async function readScreenText(inputPath) {
   const ext = path.extname(inputPath).toLowerCase();
   let pngPath = path.resolve(inputPath);
   let temp = false;
@@ -110,12 +119,15 @@ export function readScreenText(inputPath) {
     convertToPng(inputPath, pngPath);
   }
   try {
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-File', OCR_SCRIPT, '-Path', pngPath], {
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-File', OCR_SCRIPT, '-Path', pngPath], {
       encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 60000,
+      windowsHide: true,
     });
-    return String(out ?? '').trim();
+    return String(stdout ?? '').trim();
+  } catch (err) {
+    const stderr = err && err.stderr ? String(err.stderr).trim() : '';
+    throw new Error(`OCR failed${stderr ? ': ' + stderr : ': ' + (err?.message ?? err)}`);
   } finally {
     if (temp) {
       try { fs.unlinkSync(pngPath); } catch {}
@@ -124,32 +136,28 @@ export function readScreenText(inputPath) {
 }
 
 export async function waitForText(session, { pattern, timeoutMs = 5000, intervalMs = 250, regex = false } = {}) {
+  if (typeof pattern !== 'string' || pattern.length === 0) {
+    throw new Error('pattern must be a non-empty string');
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error('timeoutMs must be a non-negative number');
+  }
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) {
+    throw new Error('intervalMs must be a positive number');
+  }
+
+  const matcher = regex ? new RegExp(pattern) : (t) => String(t).includes(pattern);
   const start = Date.now();
   let text = '';
-  let found = false;
-  const matcher = regex ? (t) => new RegExp(pattern).test(t) : (t) => String(t).includes(pattern);
 
   while (true) {
-    try {
-      const ppm = await captureScreen(session);
-      text = readScreenText(ppm);
-    } catch {
-      // stop polling if capture/read fails
-      break;
-    }
-    try {
-      if (matcher(text)) {
-        found = true;
-        break;
-      }
-    } catch {
-      break;
-    }
+    const ppm = await captureScreen(session);
+    text = await readScreenText(ppm);
+    if (matcher(text)) return { found: true, text, elapsedMs: Date.now() - start };
     const remaining = timeoutMs - (Date.now() - start);
     if (remaining <= 0) break;
     await sleep(Math.min(intervalMs, remaining));
-    if (Date.now() - start >= timeoutMs) break;
   }
 
-  return { found, text, elapsedMs: Date.now() - start };
+  return { found: false, text, elapsedMs: Date.now() - start };
 }

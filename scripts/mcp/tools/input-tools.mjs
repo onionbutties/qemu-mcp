@@ -1,13 +1,5 @@
 import { z } from 'zod';
-
-function textResult(result) {
-  return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-}
-
-function errorResult(err) {
-  const message = err && err.message ? err.message : String(err);
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }] };
-}
+import { textResult, errorResult } from './result.mjs';
 
 async function withLock(session, fn) {
   if (typeof session?.withLock === 'function') return session.withLock(fn);
@@ -22,7 +14,7 @@ async function getMonitor(session) {
 export function registerInputTools(server, session) {
   server.registerTool('send_key', {
     description: 'Send a key sequence to the VM.',
-    inputSchema: { keys: z.string() },
+    inputSchema: { keys: z.string().min(1) },
   }, async (args = {}) => {
     try {
       const { keys } = args ?? {};
@@ -46,8 +38,8 @@ export function registerInputTools(server, session) {
   server.registerTool('type_text', {
     description: 'Type text into the VM.',
     inputSchema: {
-      text: z.string(),
-      perKeyMs: z.number().optional(),
+      text: z.string().min(1),
+      perKeyMs: z.number().int().min(0).max(1000).optional(),
     },
   }, async (args = {}) => {
     try {
@@ -63,7 +55,6 @@ export function registerInputTools(server, session) {
           throw new Error('monitor does not support type');
         }
         if (typeof session?.type === 'function') { await session.type(text, perKeyMs ?? 25); return { ok: true }; }
-        if (typeof session?.command === 'function') { await session.command('sendkey ' + text); return { ok: true }; }
         throw new Error('session does not support type');
       });
       return textResult(result);
@@ -75,8 +66,8 @@ export function registerInputTools(server, session) {
   server.registerTool('press', {
     description: 'Press a key sequence, optionally holding it.',
     inputSchema: {
-      keys: z.string(),
-      holdMs: z.number().optional(),
+      keys: z.string().min(1),
+      holdMs: z.number().int().min(0).max(10000).optional(),
     },
   }, async (args = {}) => {
     try {
@@ -102,8 +93,8 @@ export function registerInputTools(server, session) {
   server.registerTool('mouse_move', {
     description: 'Move the mouse by a relative delta.',
     inputSchema: {
-      dx: z.number(),
-      dy: z.number(),
+      dx: z.number().int(),
+      dy: z.number().int(),
     },
   }, async (args = {}) => {
     try {
@@ -125,9 +116,9 @@ export function registerInputTools(server, session) {
   });
 
   server.registerTool('mouse_button', {
-    description: 'Change mouse button state.',
+    description: 'Change mouse button state. button is a bitmask: 1 left, 2 right, 4 middle.',
     inputSchema: {
-      button: z.number(),
+      button: z.number().int().min(0).max(7),
       down: z.boolean().optional(),
     },
   }, async (args = {}) => {

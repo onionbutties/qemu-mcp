@@ -1,21 +1,19 @@
 // Stateful wrapper around QEMU launch + QMP monitor.
-import { launch, Monitor } from '../lib/qemu.mjs';
-import { machineArgs } from '../lib/machine.mjs';
-
-const DEFAULT_PORT = 5555;
+import fs from 'node:fs';
+import { launch, Monitor, MON_PORT } from '../lib/qemu.mjs';
+import { machineArgs, DISK } from '../lib/machine.mjs';
 
 export class VmSession {
   constructor(opts = {}) {
     this.launcher = opts.launcher ?? null;
     this.monitorFactory = opts.monitorFactory ?? null;
-    this.port = opts.monitorPort ?? DEFAULT_PORT;
+    this.port = opts.monitorPort ?? MON_PORT;
     this.proc = null;
     this.mon = null;
     this.lastError = null;
     this.disconnected = false;
+    this.disk = null;
     this.lock = Promise.resolve();
-    // keep a reference to the last launch options for reset/restart helpers
-    this.lastLaunchOpts = null;
   }
 
   status() {
@@ -24,6 +22,7 @@ export class VmSession {
       running,
       pid: this.proc ? this.proc.pid ?? null : null,
       monitorPort: this.port,
+      disk: this.disk,
       lastError: this.lastError,
     };
   }
@@ -33,14 +32,19 @@ export class VmSession {
   }
 
   async launch(opts = {}) {
+    opts = opts ?? {};
     if (this.isRunning()) {
       throw new Error('VM already running');
+    }
+    const disk = opts.disk || DISK;
+    if (!fs.existsSync(disk) || !fs.statSync(disk).isFile()) {
+      throw new Error(`disk not found: ${disk}. Create it with vm_create_disk or pass a disk path.`);
     }
     this.lastError = null;
     this.disconnected = false;
     const port = (opts && opts.monitorPort != null) ? opts.monitorPort : this.port;
     this.port = port;
-    this.lastLaunchOpts = opts;
+    this.disk = disk;
 
     let result;
     if (this.launcher) {
@@ -133,18 +137,24 @@ export class VmSession {
   async reset() {
     return this.withLock(async () => {
       const mon = await this.monitor();
+      let lastError = null;
       if (mon && typeof mon.execute === 'function') {
         try {
           await mon.execute('system_reset');
           return { ok: true };
-        } catch {
-          // fall through to human command
+        } catch (err) {
+          lastError = err;
         }
       }
       if (mon && typeof mon.cmd === 'function') {
-        await mon.cmd('system_reset');
+        try {
+          await mon.cmd('system_reset');
+          return { ok: true };
+        } catch (err) {
+          lastError = err;
+        }
       }
-      return { ok: true };
+      throw lastError ?? new Error('monitor does not support reset');
     });
   }
 

@@ -96,13 +96,17 @@ function pixel(img, x, y) {
 
 export function toAscii(img, { cols = 100, rows = 0, crop = null } = {}) {
   const c = crop ?? { x: 0, y: 0, w: img.width, h: img.height };
-  const outRows = rows || Math.max(1, Math.round(((c.h / c.w) * cols) / 2));
+  if (!c || c.w <= 0 || c.h <= 0) throw new Error('crop must have positive width and height');
+  const outCols = Number.isFinite(cols) && cols > 0 ? Math.floor(cols) : 100;
+  const outRows = Number.isFinite(rows) && rows > 0
+    ? Math.floor(rows)
+    : Math.max(1, Math.round(((c.h / c.w) * outCols) / 2));
   const lines = [];
   for (let ry = 0; ry < outRows; ry++) {
     let line = '';
-    for (let rx = 0; rx < cols; rx++) {
-      const x0 = c.x + Math.floor((rx * c.w) / cols);
-      const x1 = c.x + Math.max(x0 + 1, Math.floor(((rx + 1) * c.w) / cols));
+    for (let rx = 0; rx < outCols; rx++) {
+      const x0 = c.x + Math.floor((rx * c.w) / outCols);
+      const x1 = c.x + Math.max(x0 + 1, Math.floor(((rx + 1) * c.w) / outCols));
       const y0 = c.y + Math.floor((ry * c.h) / outRows);
       const y1 = c.y + Math.max(y0 + 1, Math.floor(((ry + 1) * c.h) / outRows));
       let sum = 0, n = 0;

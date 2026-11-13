@@ -1,5 +1,5 @@
 // QEMU process launcher and human-monitor client.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,8 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { textToKeys } from './keys.mjs';
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-export const QEMU = 'C:\\Program Files\\qemu\\qemu-system-i386.exe';
-export const MON_PORT = 5555;
+export const QEMU = process.env.QEMU_BIN || 'C:\\Program Files\\qemu\\qemu-system-i386.exe';
+export const QEMU_IMG = process.env.QEMU_IMG || path.join(
+  path.dirname(QEMU),
+  process.platform === 'win32' ? 'qemu-img.exe' : 'qemu-img',
+);
+export const MON_PORT = Number(process.env.QEMU_MONITOR_PORT) || 5555;
 
 export const P = (...parts) => path.join(ROOT, ...parts);
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -177,10 +181,23 @@ export async function launch(args, { monitor = true, port = MON_PORT, logFile = 
   };
 }
 
+/** Create a qcow2 disk synchronously and return its path. */
+export function createDisk(file, sizeMb, format = 'qcow2') {
+  if (!Number.isFinite(sizeMb) || sizeMb <= 0) throw new Error('sizeMb must be a positive number');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const r = spawnSync(QEMU_IMG, ['create', '-f', format, file, `${sizeMb}M`], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (r.status !== 0) {
+    throw new Error(`qemu-img create failed: ${(r.stderr || r.stdout || '').trim() || `exit ${r.status}`}`);
+  }
+  return { path: file, sizeMb, format };
+}
+
 /** Create a qcow2 disk if it does not exist yet. */
 export function ensureDisk(file, sizeMb) {
   if (fs.existsSync(file)) return false;
-  const r = spawn(QEMU.replace(/qemu-system-i386\.exe$/, 'qemu-img.exe'),
-    ['create', '-f', 'qcow2', file, `${sizeMb}M`], { stdio: 'inherit' });
-  return r;
+  createDisk(file, sizeMb);
+  return true;
 }

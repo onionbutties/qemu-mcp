@@ -1,14 +1,6 @@
 import { z } from 'zod';
 import { listMacros, runMacro } from '../macros.mjs';
-
-function textResult(result) {
-  return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-}
-
-function errorResult(err) {
-  const message = err && err.message ? err.message : String(err);
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }] };
-}
+import { textResult, errorResult } from './result.mjs';
 
 export function registerMacroTools(server, session) {
   server.registerTool('macro_list', {
@@ -26,7 +18,7 @@ export function registerMacroTools(server, session) {
   server.registerTool('macro_run', {
     description: 'Run a named macro with optional arguments.',
     inputSchema: {
-      name: z.string(),
+      name: z.string().min(1),
       args: z.record(z.any()).optional(),
     },
   }, async (args = {}) => {

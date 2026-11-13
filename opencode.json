@@ -5,8 +5,9 @@
       "type": "local",
       "command": [
         "node",
-        "D:\\_oblocal\\stuff\\qemu-mcp\\scripts\\mcp\\server.mjs"
+        "scripts/mcp/server.mjs"
       ],
+      "cwd": ".",
       "enabled": true
     }
   }

@@ -32,7 +32,8 @@ export async function runMacro(name, session, args = {}, dir) {
   const safeName = validateName(name);
   const target = resolveDir(dir);
   const filePath = path.join(target, `${safeName}.mjs`);
-  const moduleUrl = pathToFileURL(filePath).href;
+  const stat = await fs.stat(filePath);
+  const moduleUrl = `${pathToFileURL(filePath).href}?v=${stat.mtimeMs}`;
   const mod = await import(moduleUrl);
   const fn = mod && mod.default;
   if (typeof fn !== 'function') {

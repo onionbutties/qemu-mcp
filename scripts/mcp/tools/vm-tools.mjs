@@ -1,13 +1,6 @@
 import { z } from 'zod';
-
-function textResult(result) {
-  return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-}
-
-function errorResult(err) {
-  const message = err && err.message ? err.message : String(err);
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }] };
-}
+import { createDisk } from '../../lib/qemu.mjs';
+import { textResult, errorResult } from './result.mjs';
 
 async function withLock(session, fn) {
   if (typeof session?.withLock === 'function') return session.withLock(fn);
@@ -28,21 +21,39 @@ export function registerVmTools(server, session) {
   });
 
   server.registerTool('vm_launch', {
-    description: 'Launch the QEMU virtual machine.',
+    description: 'Launch the QEMU virtual machine. The disk must already exist.',
     inputSchema: {
-      disk: z.string().optional(),
-      floppy0: z.string().optional(),
-      cd: z.string().optional(),
-      shareImg: z.string().optional(),
-      stick: z.string().optional(),
+      disk: z.string().min(1).optional(),
+      diskFormat: z.enum(['qcow2', 'raw', 'vmdk', 'vdi', 'vpc']).optional(),
+      floppy0: z.string().min(1).optional(),
+      cd: z.string().min(1).optional(),
+      shareImg: z.string().min(1).optional(),
+      stick: z.string().min(1).optional(),
       usbHid: z.boolean().optional(),
-      boot: z.string().optional(),
+      boot: z.enum(['a', 'c', 'd']).optional(),
       sound: z.boolean().optional(),
-      monitorPort: z.number().optional(),
+      monitorPort: z.number().int().min(1).max(65535).optional(),
     },
   }, async (args = {}) => {
     try {
       const result = await withLock(session, async () => session.launch(args ?? {}));
+      return textResult(result);
+    } catch (err) {
+      return errorResult(err);
+    }
+  });
+
+  server.registerTool('vm_create_disk', {
+    description: 'Create a qcow2 disk image with qemu-img.',
+    inputSchema: {
+      path: z.string().min(1),
+      sizeMb: z.number().int().min(1).max(1024 * 1024),
+      format: z.enum(['qcow2', 'raw', 'vmdk', 'vdi', 'vpc']).optional(),
+    },
+  }, async (args = {}) => {
+    try {
+      const { path: diskPath, sizeMb, format } = args ?? {};
+      const result = await withLock(session, async () => createDisk(diskPath, sizeMb, format));
       return textResult(result);
     } catch (err) {
       return errorResult(err);
@@ -66,30 +77,21 @@ export function registerVmTools(server, session) {
     inputSchema: {},
   }, async () => {
     try {
+      if (typeof session?.reset === 'function') {
+        return textResult(await session.reset());
+      }
       const result = await withLock(session, async () => {
-        if (typeof session?.monitor === 'function') {
-          const mon = await session.monitor();
-          if (mon) {
-            if (typeof mon.execute === 'function') {
-              try {
-                await mon.execute('system_reset', {});
-                return { ok: true };
-              } catch (err) {
-                if (typeof mon.cmd !== 'function') throw err;
-                // fall through to human monitor command
-              }
-            }
-            if (typeof mon.cmd === 'function') {
-              await mon.cmd('system_reset');
-              return { ok: true };
-            }
-            throw new Error('monitor does not support reset');
-          }
+        const mon = typeof session?.monitor === 'function' ? await session.monitor() : null;
+        if (!mon) throw new Error('VM not running');
+        if (typeof mon.execute === 'function') {
+          await mon.execute('system_reset', {});
+          return { ok: true };
         }
-        if (typeof session?.reset === 'function') {
-          return session.reset();
+        if (typeof mon.cmd === 'function') {
+          await mon.cmd('system_reset');
+          return { ok: true };
         }
-        throw new Error('session does not support reset');
+        throw new Error('monitor does not support reset');
       });
       return textResult(result);
     } catch (err) {
