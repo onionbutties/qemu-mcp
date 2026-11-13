@@ -3,7 +3,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_DIR = path.join(MODULE_DIR, 'macros');
+const DEFAULT_DIR = process.env.QEMU_MCP_MACROS
+  ? path.resolve(process.env.QEMU_MCP_MACROS)
+  : path.join(MODULE_DIR, 'macros');
 
 function resolveDir(dir) {
   return dir ? path.resolve(dir) : DEFAULT_DIR;

@@ -1,15 +1,14 @@
 // Single source of truth for the emulated machine's hardware.
-import { P } from './qemu.mjs';
+import path from 'node:path';
 
-export const DISK = process.env.QEMU_DISK || P('vm', 'wfw.qcow2');
-export const SHARE = P('share');
+export const DISK = process.env.QEMU_DISK || path.resolve(process.cwd(), 'vm', 'disk.qcow2');
 export { MON_PORT } from './qemu.mjs';
 
 /**
  * Build the QEMU argument list.
  *
  * opts:
- *   disk      disk image (default vm/wfw.qcow2 or $QEMU_DISK)
+ *   disk      disk image (default ./vm/disk.qcow2 or $QEMU_DISK)
  *   diskFormat  QEMU disk format (default qcow2)
  *   floppy0   floppy image to insert in A: (install media)
  *   cd        ISO to insert in the CD-ROM drive
@@ -35,7 +34,7 @@ export function machineArgs(opts = {}) {
   } = opts;
 
   const args = [
-    '-name', 'Windows for Workgroups 3.11',
+    '-name', 'QEMU guest',
     '-machine', 'pc',
     '-cpu', 'pentium',
     '-m', '32',

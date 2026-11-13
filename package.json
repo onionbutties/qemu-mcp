@@ -4,6 +4,9 @@
   "description": "MCP server for controlling QEMU virtual machines with text-first screen access and FAT image tools.",
   "type": "module",
   "private": true,
+  "bin": {
+    "qemu-mcp": "scripts/mcp/server.mjs"
+  },
   "scripts": {
     "mcp": "node scripts/mcp/server.mjs",
     "test": "node --test \"tests/mcp/*.test.mjs\" \"tests/fat/*.test.mjs\""
@@ -11,6 +14,12 @@
   "engines": {
     "node": ">=20"
   },
+  "files": [
+    "scripts",
+    "tools",
+    "docs/images",
+    "opencode.json"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "zod": "^4.6.7"

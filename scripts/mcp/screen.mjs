@@ -30,7 +30,7 @@ async function withOptionalLock(session, fn) {
 export async function captureScreen(session, { outDir } = {}) {
   const dir = outDir
     ? path.resolve(outDir)
-    : path.join(ROOT, 'vm', 'shots', 'mcp');
+    : path.join(process.cwd(), 'vm', 'shots', 'mcp');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, uniqueName('.ppm'));
 

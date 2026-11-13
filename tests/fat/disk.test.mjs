@@ -4,11 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildImage, listImage, readImage } from '../../tools/fatimg.mjs';
 
-const tmp = path.join(process.cwd(), 'vm', 'test', 'mcp-fat.img');
+const work = path.join(process.cwd(), 'tests', 'tmp');
+fs.mkdirSync(work, { recursive: true });
+const tmp = path.join(work, 'mcp-fat.img');
 
 test('readImage round-trips a built FAT image', () => {
   fs.rmSync(tmp, { force: true });
-  const src = path.join(process.cwd(), 'vm', 'test', 'HELLO.TXT');
+  const src = path.join(work, 'HELLO.TXT');
   fs.writeFileSync(src, 'hello from fat\n');
   buildImage(tmp, { sizeBytes: 4 * 1024 * 1024, files: [{ dosPath: 'HELLO.TXT', hostPath: src }] });
   const buf = readImage(tmp, 'HELLO.TXT');
@@ -19,7 +21,7 @@ test('readImage round-trips a built FAT image', () => {
 
 test('readImage follows multi-cluster chains', () => {
   fs.rmSync(tmp, { force: true });
-  const src = path.join(process.cwd(), 'vm', 'test', 'BIG.BIN');
+  const src = path.join(work, 'BIG.BIN');
   const payload = Buffer.alloc(20000);
   for (let i = 0; i < payload.length; i++) payload[i] = i % 251;
   fs.writeFileSync(src, payload);
@@ -30,7 +32,7 @@ test('readImage follows multi-cluster chains', () => {
 
 test('readImage decodes a 12-bit FAT', () => {
   // Hand-built 1.44 MB FAT12 floppy: one 1300-byte file across clusters 2-4.
-  const floppy = path.join(process.cwd(), 'vm', 'test', 'mcp-fat12.img');
+  const floppy = path.join(work, 'mcp-fat12.img');
   const img = Buffer.alloc(2880 * 512, 0);
   img[0] = 0xeb; img[1] = 0x3c; img[2] = 0x90;
   img.write('MSDOS5.0', 3, 'latin1');
@@ -80,7 +82,7 @@ test('readImage decodes a 12-bit FAT', () => {
 
 test('readImage walks directories case-insensitively and reports missing files', () => {
   fs.rmSync(tmp, { force: true });
-  const dir = path.join(process.cwd(), 'vm', 'test', 'fat-src');
+  const dir = path.join(work, 'fat-src');
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, 'SUB'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'HELLO.TXT'), 'hello from fat\n');

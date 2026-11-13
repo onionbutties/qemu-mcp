@@ -8,7 +8,7 @@ import { waitForText, readScreenAscii } from '../../scripts/mcp/screen.mjs';
 import { buildFatImage } from '../../scripts/mcp/disk.mjs';
 import { textResult } from '../../scripts/mcp/tools/result.mjs';
 
-const ppm = path.join(process.cwd(), 'vm', 'shots', '02-setup.ppm');
+const ppm = path.join(process.cwd(), 'tests', 'fixtures', '02-setup.ppm');
 
 test('textResult returns raw strings without JSON quoting', () => {
   assert.equal(textResult('hello\nworld').content[0].text, 'hello\nworld');
