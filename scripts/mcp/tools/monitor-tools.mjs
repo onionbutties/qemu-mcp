@@ -29,6 +29,27 @@ export function registerMonitorTools(server, session) {
     }
   });
 
+  server.registerTool('vm_events', {
+    description: 'Return recent QMP events: SHUTDOWN, RESET, STOP, SUSPEND, WAKEUP, GUEST_PANICKED, BLOCK_IO_ERROR.',
+    inputSchema: {
+      limit: z.number().int().min(1).max(200).optional(),
+    },
+  }, async (args = {}) => {
+    try {
+      const { limit } = args ?? {};
+      const n = limit ?? 50;
+      const result = await withLock(session, async () => {
+        if (typeof session?.events === 'function') return session.events(n);
+        const mon = (typeof session?.monitor === 'function') ? await session.monitor() : null;
+        if (!mon) throw new Error('VM not running');
+        return Array.isArray(mon.eventLog) ? mon.eventLog.slice(-n) : [];
+      });
+      return textResult(result);
+    } catch (err) {
+      return errorResult(err);
+    }
+  });
+
   server.registerTool('qmp_execute', {
     description: 'Execute a QMP command.',
     inputSchema: {

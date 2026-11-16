@@ -11,13 +11,21 @@ function decodePpm(buf) {
   const tokens = [];
   while (tokens.length < 3) {
     while (pos < buf.length && /\s/.test(String.fromCharCode(buf[pos]))) pos++;
-    if (buf[pos] === 0x23) { while (buf[pos] !== 0x0a) pos++; continue; }
+    if (pos >= buf.length) throw new Error('truncated PPM header');
+    if (buf[pos] === 0x23) {
+      while (pos < buf.length && buf[pos] !== 0x0a) pos++;
+      continue;
+    }
     let t = '';
     while (pos < buf.length && !/\s/.test(String.fromCharCode(buf[pos]))) t += String.fromCharCode(buf[pos++]);
     tokens.push(t);
   }
-  pos++;
+  // The spec puts exactly one whitespace byte after maxval, but some writers
+  // emit CRLF.
+  if (buf[pos] === 0x0d && buf[pos + 1] === 0x0a) pos += 2;
+  else pos++;
   const [w, h, max] = tokens.map(Number);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) throw new Error('invalid PPM dimensions');
   if (max !== 255) throw new Error('unsupported PPM maxval ' + max);
   const need = w * h * 3;
   const data = buf.subarray(pos, pos + need);
@@ -92,6 +100,22 @@ export function decodeImage(file) {
 function pixel(img, x, y) {
   const i = (y * img.width + x) * img.channels;
   return [img.data[i], img.data[i + 1], img.data[i + 2]];
+}
+
+/** Return a cropped copy of a decoded image, clamped to its bounds. */
+export function cropImage(img, crop) {
+  const x = Math.max(0, Math.floor(crop?.x ?? 0));
+  const y = Math.max(0, Math.floor(crop?.y ?? 0));
+  const w = Math.min(img.width - x, Math.floor(crop?.w ?? img.width));
+  const h = Math.min(img.height - y, Math.floor(crop?.h ?? img.height));
+  if (w <= 0 || h <= 0) throw new Error('crop is outside the image');
+  const stride = w * img.channels;
+  const out = Buffer.alloc(stride * h);
+  for (let row = 0; row < h; row++) {
+    const start = ((y + row) * img.width + x) * img.channels;
+    img.data.copy(out, row * stride, start, start + stride);
+  }
+  return { width: w, height: h, channels: img.channels, data: out };
 }
 
 export function toAscii(img, { cols = 100, rows = 0, crop = null } = {}) {

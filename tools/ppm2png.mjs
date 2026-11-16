@@ -4,12 +4,32 @@ import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { decodeImage } from './imgpeek.mjs';
 
+// zlib.crc32 only exists from Node 20.15, while package.json allows any 20.x.
+let crcTable = null;
+function crc32Fallback(buf) {
+  if (!crcTable) {
+    crcTable = new Int32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      crcTable[n] = c;
+    }
+  }
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) c = crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+const pngCrc = typeof zlib.crc32 === 'function'
+  ? (buf) => zlib.crc32(buf) >>> 0
+  : crc32Fallback;
+
 function chunk(type, data) {
   const len = Buffer.alloc(4);
   len.writeUInt32BE(data.length);
   const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
   const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(zlib.crc32(body) >>> 0);
+  crc.writeUInt32BE(pngCrc(body));
   return Buffer.concat([len, body, crc]);
 }
 

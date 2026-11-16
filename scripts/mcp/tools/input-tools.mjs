@@ -140,4 +140,24 @@ export function registerInputTools(server, session) {
       return errorResult(err);
     }
   });
+
+  server.registerTool('click_at', {
+    description: 'Click absolute screen pixels. Requires a guest driver for the USB tablet; use mouse_move for relative input.',
+    inputSchema: {
+      x: z.number().int().min(0),
+      y: z.number().int().min(0),
+      button: z.enum(['left', 'middle', 'right']).optional(),
+    },
+  }, async (args = {}) => {
+    try {
+      const { x, y, button } = args ?? {};
+      const result = await withLock(session, async () => {
+        if (typeof session?.clickAt !== 'function') throw new Error('session does not support click_at');
+        return session.clickAt(x, y, { button });
+      });
+      return textResult(result ?? { ok: true });
+    } catch (err) {
+      return errorResult(err);
+    }
+  });
 }

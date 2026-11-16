@@ -5,5 +5,5 @@ export function textResult(result) {
 
 export function errorResult(err) {
   const message = err && err.message ? err.message : String(err);
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: message }) }] };
+  return { isError: true, content: [{ type: 'text', text: message }] };
 }

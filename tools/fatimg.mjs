@@ -9,6 +9,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const SECTOR = 512;
+// The image is streamed to disk, but the cap still bounds an accidental huge
+// request (and stays inside FAT16's practical range).
+export const MAX_IMAGE_BYTES = 512 * 1024 * 1024;
 
 const CLUSTER_SIZES = [
   { max: 16 * 1024 * 1024, spc: 4 },
@@ -19,6 +22,12 @@ const CLUSTER_SIZES = [
   { max: 2048 * 1024 * 1024, spc: 64 },
   { max: Infinity, spc: 64 },
 ];
+
+// FAT12/FAT16 is chosen by cluster count, not by the BPB type string. A volume
+// built with fewer than 4085 clusters is FAT12 to DOS and Windows even though
+// the 16-bit FAT entries look valid to our own reader.
+const MIN_FAT16_CLUSTERS = 4085;
+const MAX_FAT16_CLUSTERS = 65524;
 
 function pickSpc(sizeBytes) {
   for (const s of CLUSTER_SIZES) if (sizeBytes <= s.max) return s.spc;
@@ -44,36 +53,83 @@ function fatTime(d) {
 }
 
 /** Walk host directories into a plain tree of {name, dir, children, size, mtime}. */
-export function treeFromHost(hostPath, dosNameHint = null) {
-  const st = fs.statSync(hostPath);
+export function treeFromHost(hostPath, dosNameHint = null, seen = new Set()) {
+  const st = fs.lstatSync(hostPath);
+  if (st.isSymbolicLink()) {
+    throw new Error(`symlinked paths are not supported: ${hostPath}`);
+  }
   const name = dosNameHint ?? path.basename(hostPath);
   if (st.isDirectory()) {
+    const real = fs.realpathSync(hostPath);
+    if (seen.has(real)) {
+      throw new Error(`directory cycle detected: ${hostPath}`);
+    }
+    seen.add(real);
     const children = fs.readdirSync(hostPath)
       .filter((n) => !n.startsWith('.'))
       .sort()
-      .map((n) => treeFromHost(path.join(hostPath, n), n));
+      .map((n) => treeFromHost(path.join(hostPath, n), n, seen));
     return { name, dir: true, children, mtime: st.mtime };
   }
   return { name, dir: false, size: st.size, hostPath, mtime: st.mtime };
 }
 
-function planGeometry(sizeBytes, spcRequested) {  const spc = spcRequested ?? pickSpc(sizeBytes);
+function planGeometry(sizeBytes, spcRequested) {
   const totalSectors = Math.floor(sizeBytes / SECTOR);
   const reserved = 1;
   const fats = 2;
   const rootEntries = 512;
   const rootSectors = Math.ceil((rootEntries * 32) / SECTOR);
-  let fatSectors = 1;
-  let clusters = 0;
-  for (let i = 0; i < 40; i++) {
-    const dataSectors = totalSectors - reserved - fats * fatSectors - rootSectors;
-    clusters = Math.floor(dataSectors / spc);
-    const need = Math.ceil(((clusters + 2) * 2) / SECTOR);
-    if (need === fatSectors) break;
-    fatSectors = need;
+
+  const measure = (spc) => {
+    let fatSectors = 1;
+    let clusters = 0;
+    for (let i = 0; i < 40; i++) {
+      const dataSectors = totalSectors - reserved - fats * fatSectors - rootSectors;
+      clusters = Math.floor(dataSectors / spc);
+      const need = Math.ceil(((clusters + 2) * 2) / SECTOR);
+      if (need === fatSectors) break;
+      fatSectors = need;
+    }
+    return { spc, clusters, fatSectors };
+  };
+
+  let geometry;
+  if (spcRequested != null) {
+    geometry = measure(spcRequested);
+  } else {
+    let spc = pickSpc(sizeBytes);
+    geometry = measure(spc);
+    // Shrink the cluster size until the volume is legal FAT16. Sizes above
+    // this loop only ever need the table value.
+    while (geometry.clusters < MIN_FAT16_CLUSTERS && spc > 1) {
+      spc /= 2;
+      geometry = measure(spc);
+    }
   }
-  if (clusters >= 65525) throw new Error(`too many clusters for FAT16 (${clusters}); increase cluster size`);
-  return { spc, totalSectors, reserved, fats, rootEntries, rootSectors, fatSectors, clusters };
+
+  if (geometry.clusters < MIN_FAT16_CLUSTERS) {
+    throw new Error(
+      `image too small for FAT16 (${geometry.clusters} clusters, need ${MIN_FAT16_CLUSTERS}); `
+      + 'FAT12 is not implemented, so use at least about 2.2 MiB',
+    );
+  }
+  if (geometry.clusters > MAX_FAT16_CLUSTERS) {
+    throw new Error(
+      `too many clusters for FAT16 (${geometry.clusters}, maximum ${MAX_FAT16_CLUSTERS}); use a larger cluster size`,
+    );
+  }
+
+  return {
+    spc: geometry.spc,
+    totalSectors,
+    reserved,
+    fats,
+    rootEntries,
+    rootSectors,
+    fatSectors: geometry.fatSectors,
+    clusters: geometry.clusters,
+  };
 }
 
 /** Assign clusters to every file/dir below `node`. Root uses the fixed root area. */
@@ -99,10 +155,31 @@ function allocate(node, startCluster, state, allocated = []) {
   return next;
 }
 
+/** Assign collision-free 8.3 names to every child of one directory. */
+function assignShortNames(children) {
+  const used = new Set();
+  for (const child of children) {
+    const { base, ext } = dosName(child.name);
+    const stem = base.replace(/\s+$/, '');
+    const key = (candidate) => `${candidate.replace(/\s+$/, '')}.${ext.replace(/\s+$/, '')}`;
+    let candidate = base;
+    for (let n = 1; used.has(key(candidate)); n++) {
+      if (n > 9999) throw new Error(`cannot assign a unique 8.3 name to ${child.name}`);
+      const suffix = `~${n}`;
+      candidate = (stem.slice(0, Math.max(1, 8 - suffix.length)) + suffix).padEnd(8, ' ');
+    }
+    used.add(key(candidate));
+    child.dosBase = candidate;
+    child.dosExt = ext;
+  }
+}
+
 function writeDirEntries(buf, offset, children, label) {
   let p = offset;
   for (const child of children) {
-    const { base, ext } = dosName(child.name);
+    const fallback = dosName(child.name);
+    const base = child.dosBase ?? fallback.base;
+    const ext = child.dosExt ?? fallback.ext;
     buf.write(base, p, 8, 'latin1');
     buf.write(ext, p + 8, 3, 'latin1');
     buf[p + 11] = child.dir ? 0x10 : 0x20;
@@ -122,7 +199,14 @@ function writeDirEntries(buf, offset, children, label) {
   }
 }
 
-function buildFat(image, state, root, files) {
+function writeAt(fd, buf, offset) {
+  let written = 0;
+  while (written < buf.length) {
+    written += fs.writeSync(fd, buf, written, buf.length - written, offset + written);
+  }
+}
+
+function buildFat(fd, state, root) {
   const { spc, fatSectors, reserved, rootSectors } = state;
   const partOffset = state.partitionOffset ?? 0;
   const clusterBytes = spc * SECTOR;
@@ -136,13 +220,27 @@ function buildFat(image, state, root, files) {
     for (let i = 0; i < count; i++) fat[start + i] = (i === count - 1) ? 0xffff : start + i + 1;
   };
 
+  // Stream each file one cluster at a time; never hold the whole file or the
+  // whole image in memory.
   const writeFile = (node) => {
-    const data = fs.readFileSync(node.hostPath);
-    const count = Math.max(1, Math.ceil(data.length / clusterBytes));
-    const buf = Buffer.alloc(count * clusterBytes, 0);
-    data.copy(buf);
+    const count = Math.max(1, Math.ceil(node.size / clusterBytes));
     chain(node.cluster, count);
-    buf.copy(image, clusterOffset(node.cluster));
+    if (node.size === 0) return;
+    const input = fs.openSync(node.hostPath, 'r');
+    try {
+      const chunk = Buffer.alloc(clusterBytes, 0);
+      let cluster = node.cluster;
+      let remaining = node.size;
+      while (remaining > 0) {
+        const read = fs.readSync(input, chunk, 0, Math.min(clusterBytes, remaining), null);
+        if (read <= 0) break;
+        writeAt(fd, chunk.subarray(0, read), clusterOffset(cluster));
+        remaining -= read;
+        cluster++;
+      }
+    } finally {
+      fs.closeSync(input);
+    }
   };
 
   const writeDir = (node, isRoot, parentCluster) => {
@@ -161,11 +259,10 @@ function buildFat(image, state, root, files) {
     }
     writeDirEntries(buf, pos, node.children, isRoot ? state.label : null);
     if (isRoot) {
-      buf.copy(image, partOffset + (reserved + 2 * fatSectors) * SECTOR);
+      writeAt(fd, buf, partOffset + (reserved + 2 * fatSectors) * SECTOR);
     } else {
-      const clusters = bytes / clusterBytes;
-      chain(node.cluster, clusters);
-      buf.copy(image, clusterOffset(node.cluster));
+      chain(node.cluster, bytes / clusterBytes);
+      writeAt(fd, buf, clusterOffset(node.cluster));
     }
     for (const child of node.children) {
       if (child.dir) writeDir(child, false, isRoot ? 0 : node.cluster);
@@ -175,11 +272,11 @@ function buildFat(image, state, root, files) {
 
   writeDir(root, true, 0);
 
-  // Write both FAT copies
+  // Write both FAT copies.
   const fatBuf = Buffer.alloc(fatSectors * SECTOR, 0);
   for (let i = 0; i < fat.length; i++) fatBuf.writeUInt16LE(fat[i], i * 2);
   for (let f = 0; f < 2; f++) {
-    fatBuf.copy(image, partOffset + (reserved + f * fatSectors) * SECTOR);
+    writeAt(fd, fatBuf, partOffset + (reserved + f * fatSectors) * SECTOR);
   }
 }
 
@@ -232,9 +329,12 @@ function mbr(partitionOffset, partitionSectors, state) {
   return m;
 }
 
-export function buildImage(outPath, { sizeBytes, label = 'NO NAME', partitioned = false, fatType = 16, files = [] }) {
+export function buildImage(outPath, { sizeBytes, label = 'NO NAME', partitioned = false, fatType = 16, files = [], spc = undefined }) {
   if (fatType !== 16) throw new Error('FAT12 not implemented (only FAT16 is supported)');
   if (!Number.isInteger(sizeBytes) || sizeBytes < 4096) throw new Error('sizeBytes must be an integer >= 4096');
+  if (sizeBytes > MAX_IMAGE_BYTES) {
+    throw new Error(`image too large: ${sizeBytes} bytes; maximum is ${MAX_IMAGE_BYTES}`);
+  }
   const offsetSectors = partitioned ? 2048 : 0;
   if (sizeBytes <= offsetSectors * SECTOR) throw new Error('sizeBytes is too small for a partitioned image');
   const usableBytes = sizeBytes - offsetSectors * SECTOR;
@@ -242,7 +342,7 @@ export function buildImage(outPath, { sizeBytes, label = 'NO NAME', partitioned 
   // Build the in-memory tree from the files spec.
   const root = { name: '', dir: true, children: [] };
   for (const f of files) {
-    const node = treeFromHost(f.hostPath, f.dosPath || undefined);
+    const node = treeFromHost(f.hostPath, f.dosPath || undefined, new Set());
     if (!f.dosPath && node.dir) {
       // Empty dosPath means "splice this folder's contents into the image root".
       root.children.push(...node.children);
@@ -252,28 +352,83 @@ export function buildImage(outPath, { sizeBytes, label = 'NO NAME', partitioned 
     root.children.push(node);
   }
 
-  const state = planGeometry(usableBytes, undefined);
+  const state = planGeometry(usableBytes, spc);
   state.label = label;
   state.partitionSectors = Math.floor(usableBytes / SECTOR);
   state.partitionOffset = offsetSectors * SECTOR;
+  if (root.children.length >= state.rootEntries) {
+    throw new Error(
+      `too many entries in the image root (${root.children.length}); the FAT16 root holds ${state.rootEntries - 1} `
+      + 'files and directories. Put the files in a subdirectory instead.',
+    );
+  }
+  const assignNames = (node) => {
+    assignShortNames(node.children);
+    for (const child of node.children) if (child.dir) assignNames(child);
+  };
+  assignNames(root);
   const allocated = [];
   allocate(root, 2, state, allocated);
 
-  const image = Buffer.alloc(sizeBytes, 0);
-  buildFat(image, state, root, allocated);
-  bootSector(state, usableBytes, offsetSectors).copy(image, offsetSectors * SECTOR);
-  if (partitioned) mbr(offsetSectors, state.partitionSectors, state).copy(image, 0);
-  fs.writeFileSync(outPath, image);
+  fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true });
+  const tmpPath = `${outPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  let fd = null;
+  try {
+    fd = fs.openSync(tmpPath, 'w');
+    fs.ftruncateSync(fd, sizeBytes);
+    buildFat(fd, state, root);
+    writeAt(fd, bootSector(state, usableBytes, offsetSectors), offsetSectors * SECTOR);
+    if (partitioned) writeAt(fd, mbr(offsetSectors, state.partitionSectors, state), 0);
+    fs.closeSync(fd);
+    fd = null;
+    // Publish atomically so a failed build never leaves a half-written image.
+    fs.renameSync(tmpPath, outPath);
+  } catch (err) {
+    if (fd != null) { try { fs.closeSync(fd); } catch {} }
+    try { fs.unlinkSync(tmpPath); } catch {}
+    throw err;
+  }
   return { path: outPath, bytes: sizeBytes, clusters: state.clusters, spc: state.spc, allocated: allocated.length };
+}
+
+const PARTITION_TYPES = new Set([0x01, 0x04, 0x05, 0x06, 0x0b, 0x0c, 0x0e, 0x0f]);
+
+/** Does this 512-byte block look like a FAT12/FAT16 boot sector? */
+function looksLikeBpb(buf) {
+  if (!buf || buf.length < SECTOR) return false;
+  if (buf[0] !== 0xeb && buf[0] !== 0xe9) return false;
+  if (buf.readUInt16LE(11) !== SECTOR) return false;
+  const spc = buf[13];
+  if (spc === 0 || spc > 128 || (spc & (spc - 1)) !== 0) return false;
+  if (buf.readUInt16LE(14) === 0) return false;
+  if (buf[16] < 1 || buf[16] > 2) return false;
+  if (buf.readUInt16LE(17) === 0) return false;
+  return true;
+}
+
+/** Return the first partition's offset when the image starts with a real MBR. */
+function mbrPartition(img) {
+  if (img.length < SECTOR || img[510] !== 0x55 || img[511] !== 0xaa) return null;
+  const p = 446;
+  if (img[p] !== 0x00 && img[p] !== 0x80) return null;
+  if (!PARTITION_TYPES.has(img[p + 4])) return null;
+  const start = img.readUInt32LE(p + 8);
+  const sectors = img.readUInt32LE(p + 12);
+  if (!start || !sectors) return null;
+  const base = start * SECTOR;
+  if (base + SECTOR > img.length) return null;
+  if (!looksLikeBpb(img.subarray(base, base + SECTOR))) return null;
+  return { base, sectors };
 }
 
 /** Parse the volume geometry and FAT of an image, following a partition table if present. */
 function openVolume(imgPath) {
   const img = fs.readFileSync(imgPath);
-  let base = 0;
-  if (img[510] === 0x55 && img[511] === 0xaa && img.readUInt32LE(446 + 8) !== 0) {
-    base = img.readUInt32LE(446 + 8) * SECTOR;
-  }
+  // A non-partitioned boot sector also carries 0x55AA at 510 and boot code can
+  // put any dword at 454, so validate the partition entry and the BPB instead
+  // of trusting one offset.
+  const partition = mbrPartition(img);
+  const base = partition ? partition.base : 0;
   const bpb = img.subarray(base);
   const spc = bpb[13];
   const reserved = bpb.readUInt16LE(14);

@@ -1,0 +1,7 @@
+# git archive honors export-ignore; see docs/dev/prompt-release-to-github.md.
+# None of these paths may appear in the public release archive.
+/tests export-ignore
+/docs-dev export-ignore
+/.github export-ignore
+/.gitlab-ci.yml export-ignore
+/scripts/run-tests.mjs export-ignore
